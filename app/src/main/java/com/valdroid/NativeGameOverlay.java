@@ -29,7 +29,8 @@ import com.valdroid.game.NativeInput;
  * GameActivity. The controls' input goes to {@link NativeInput} instead of the X server. Touches no
  * control takes fall through to the player, so menus still work by touch.
  */
-public class NativeGameOverlay extends FrameLayout implements View.OnKeyListener, View.OnGenericMotionListener {
+public class NativeGameOverlay extends FrameLayout
+        implements View.OnKeyListener, View.OnGenericMotionListener, View.OnCapturedPointerListener {
     private final InputControlsView controls;
     // A physical controller, as in GameActivity: its buttons and sticks drive the game's virtual gamepad
     // (VirtualGamepad routes to InputSink's backend here). NativeUnityActivity offers us its events.
@@ -63,6 +64,13 @@ public class NativeGameOverlay extends FrameLayout implements View.OnKeyListener
         controls.setInstanceName(instanceName);   // before layout: the layout is read on the first size change
         controls.setRenderScale(1f);              // the cursor is sent as a fraction of the screen
         addView(controls, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        // Physical mouse, as GameActivity: Android's own pointer is hidden so it does not double up with
+        // the overlay's cursor, which stays the single visible one. The overlay covers the whole game,
+        // so its icon is the one Android shows.
+        android.view.PointerIcon nullIcon =
+                android.view.PointerIcon.getSystemIcon(context, android.view.PointerIcon.TYPE_NULL);
+        setPointerIcon(nullIcon);
+        controls.setPointerIcon(nullIcon);
 
         KeyboardCatcher keyboardCatcher = new KeyboardCatcher(context);
         addView(keyboardCatcher, new LayoutParams(1, 1));   // 1px, invisible
@@ -140,9 +148,13 @@ public class NativeGameOverlay extends FrameLayout implements View.OnKeyListener
             startHud();
             if (gamepad != null) gamepad.start();
             startDeviceWatch();
+            ui.removeCallbacks(mouseLockTick);
+            ui.post(mouseLockTick);
         } else {
             stopHud();
             stopDeviceWatch();
+            ui.removeCallbacks(mouseLockTick);
+            if (hasPointerCapture()) releasePointerCapture();
             if (gamepad != null) gamepad.stop();   // releases whatever the controller held
             controls.resetAll();   // nothing stays held while the game is in the background
         }
@@ -233,6 +245,7 @@ public class NativeGameOverlay extends FrameLayout implements View.OnKeyListener
 
     @Override
     public boolean onTouchEvent(android.view.MotionEvent e) {
+        if (isMouse(e)) return mouseTouch(e);
         if (scaleDetector == null) scaleDetector = new android.view.ScaleGestureDetector(getContext(), new ScaleListener());
         scaleDetector.onTouchEvent(e);
         if (e.getPointerCount() >= 2 || scaling) {   // pinch: never a tap, never a long press
@@ -274,10 +287,128 @@ public class NativeGameOverlay extends FrameLayout implements View.OnKeyListener
     }
 
     @Override public boolean onGenericMotion(View v, android.view.MotionEvent event) {
-        return gamepad != null && gamepad.onMotion(event);
+        if (gamepad != null && gamepad.onMotion(event)) return true;
+        return isMouse(event) && mouseMotion(event);
+    }
+
+    // ------------------------------------------------------------------ physical mouse
+
+    // A real mouse is taken whole, as the touches are, and goes to the game through the virtual mouse
+    // like everything else (RimDroid's overlay does the same): its moves drive the overlay's cursor, its
+    // buttons are the game's left, right and middle buttons, its wheel the wheel. Left to the player, a
+    // press arrived as a bare touch and became a left click wherever it was, so the right button never
+    // reached the game (an Infinix player could not eat, 2026-10-14). While the game holds the mouse
+    // (mouse look) it is captured, as on the box64 engine, and its relative motion turns the camera.
+    private static boolean isMouse(android.view.MotionEvent e) {
+        return (e.getSource() & android.view.InputDevice.SOURCE_MOUSE) == android.view.InputDevice.SOURCE_MOUSE
+                || e.getToolType(0) == android.view.MotionEvent.TOOL_TYPE_MOUSE;
+    }
+
+    // A mouse press must not land on the on-screen buttons under it: the mouse is the game's, the
+    // buttons are for fingers.
+    @Override public boolean onInterceptTouchEvent(android.view.MotionEvent e) {
+        return isMouse(e) || super.onInterceptTouchEvent(e);
+    }
+
+    private int mouseButtonsDown;   // MotionEvent.BUTTON_* reported pressed
+
+    private boolean mouseMotion(android.view.MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case android.view.MotionEvent.ACTION_HOVER_ENTER:
+            case android.view.MotionEvent.ACTION_HOVER_MOVE:
+                controls.moveCursorTo(e.getX(), e.getY());
+                return true;
+            case android.view.MotionEvent.ACTION_SCROLL: {
+                float v = e.getAxisValue(android.view.MotionEvent.AXIS_VSCROLL);
+                controls.moveCursorTo(e.getX(), e.getY());
+                if (v != 0) InputSink.sendMouseScroll(0, v > 0 ? 1 : -1);
+                return true;
+            }
+            default:
+                return true;   // button press/release come as touch events; nothing else is the player's
+        }
+    }
+
+    private boolean mouseTouch(android.view.MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case android.view.MotionEvent.ACTION_DOWN:
+            case android.view.MotionEvent.ACTION_MOVE:
+            case android.view.MotionEvent.ACTION_UP:
+            case android.view.MotionEvent.ACTION_CANCEL: {
+                controls.moveCursorTo(e.getX(), e.getY());
+                int action = e.getActionMasked();
+                boolean up = action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL;
+                // A synthetic mouse tap (adb "input mouse tap") carries no button state: the left one.
+                int now = up ? 0 : e.getButtonState() != 0 ? e.getButtonState() : android.view.MotionEvent.BUTTON_PRIMARY;
+                reportMouseButtons(now);
+                return true;
+            }
+            default:
+                return true;
+        }
+    }
+
+    /** Press / release the buttons whose state changed, as GLFW numbers: 0 left, 1 right, 2 middle. */
+    private void reportMouseButtons(int now) {
+        int changed = now ^ mouseButtonsDown;
+        int[] bits = { android.view.MotionEvent.BUTTON_PRIMARY, android.view.MotionEvent.BUTTON_SECONDARY,
+                android.view.MotionEvent.BUTTON_TERTIARY };
+        for (int b = 0; b < bits.length; b++) {
+            if ((changed & bits[b]) != 0) InputSink.sendMouseButton(b, (now & bits[b]) != 0);
+        }
+        mouseButtonsDown = now;
+    }
+
+    /** Captured mouse (mouse look): relative motion turns the camera; buttons and wheel as above. */
+    @Override public boolean onCapturedPointer(View v, android.view.MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case android.view.MotionEvent.ACTION_MOVE: {
+                float dx = 0, dy = 0;
+                for (int h = 0; h < e.getHistorySize(); h++) {
+                    dx += e.getHistoricalAxisValue(android.view.MotionEvent.AXIS_RELATIVE_X, h);
+                    dy += e.getHistoricalAxisValue(android.view.MotionEvent.AXIS_RELATIVE_Y, h);
+                }
+                dx += e.getAxisValue(android.view.MotionEvent.AXIS_RELATIVE_X);
+                dy += e.getAxisValue(android.view.MotionEvent.AXIS_RELATIVE_Y);
+                if (dx != 0 || dy != 0) controls.moveCursorBy(dx, dy);
+                break;
+            }
+            case android.view.MotionEvent.ACTION_SCROLL: {
+                float s = e.getAxisValue(android.view.MotionEvent.AXIS_VSCROLL);
+                if (s != 0) InputSink.sendMouseScroll(0, s > 0 ? 1 : -1);
+                break;
+            }
+            default:
+                break;
+        }
+        reportMouseButtons(e.getButtonState());
+        return true;
+    }
+
+    // As GameActivity's mouseLockTick: polled, because the lock is the game's (the bridge reports it).
+    private final Runnable mouseLockTick = new Runnable() {
+        @Override public void run() {
+            boolean locked = InputSink.isMouseLocked();
+            boolean mouse = hasPhysicalMouse();
+            controls.setMouseLocked(locked);
+            controls.setPhysicalMouse(mouse);
+            boolean want = locked && mouse;
+            if (want && !hasPointerCapture()) requestPointerCapture();
+            else if (!want && hasPointerCapture()) releasePointerCapture();
+            ui.postDelayed(this, 150);
+        }
+    };
+
+    private static boolean hasPhysicalMouse() {
+        for (int id : android.view.InputDevice.getDeviceIds()) {
+            android.view.InputDevice d = android.view.InputDevice.getDevice(id);
+            if (d != null && !d.isVirtual() && d.supportsSource(android.view.InputDevice.SOURCE_MOUSE)) return true;
+        }
+        return false;
     }
 
     @Override protected void onDetachedFromWindow() {
+        ui.removeCallbacks(mouseLockTick);
         stopDeviceWatch();
         if (gamepad != null) gamepad.stop();
         stopHud();
