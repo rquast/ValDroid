@@ -38,9 +38,20 @@ public class NativeUnityActivity extends Activity
         getIntent().putExtra("unity", getIntent().getStringExtra("unity"));
 
         mUnityPlayer = new UnityPlayerForActivityOrService(this, this);
-        FrameLayout root = mUnityPlayer.getFrameLayout();
+        // The player's own layout goes inside ours: a captured mouse (mouse look) is dispatched down the
+        // focus path, to the player's view, and only a parent of it can offer those events to the overlay.
+        FrameLayout player = mUnityPlayer.getFrameLayout();
+        FrameLayout root = new FrameLayout(this) {
+            @Override public boolean dispatchCapturedPointerEvent(MotionEvent event) {
+                if (overlay instanceof View.OnCapturedPointerListener
+                        && ((View.OnCapturedPointerListener) overlay).onCapturedPointer(overlay, event)) return true;
+                return super.dispatchCapturedPointerEvent(event);
+            }
+        };
+        root.addView(player, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(root);
-        root.requestFocus();
+        player.requestFocus();
         overlay = createOverlay(getIntent().getStringExtra(EXTRA_OVERLAY));
         if (overlay != null) {
             root.addView(overlay, new FrameLayout.LayoutParams(
