@@ -450,15 +450,60 @@ public class NativeGameOverlay extends FrameLayout implements View.OnKeyListener
             outAttrs.inputType = InputType.TYPE_CLASS_TEXT;
             outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_FLAG_NO_EXTRACT_UI;
             return new BaseInputConnection(this, false) {
+                // Keyboards that compose words (Gboard and most with suggestions) send the word as
+                // composing text and commit it whole; the dummy editor would hand that to the player
+                // as one ACTION_MULTIPLE event, which Unity drops. So composing and committed text are
+                // turned into single key presses here, as they change: what is typed is sent at once,
+                // what the keyboard takes back is erased with Backspace. Characters without a key
+                // in the virtual keyboard map (Cyrillic and the like) still cannot be typed.
+                private final StringBuilder composing = new StringBuilder();
+
+                @Override public boolean setComposingText(CharSequence text, int newCursorPosition) {
+                    replaceComposing(text);
+                    return true;
+                }
+
+                @Override public boolean commitText(CharSequence text, int newCursorPosition) {
+                    replaceComposing(text);
+                    composing.setLength(0);
+                    return true;
+                }
+
+                @Override public boolean finishComposingText() {
+                    composing.setLength(0);
+                    return true;
+                }
+
                 // The dummy editor holds no text, so a delete would remove nothing: send Backspace.
                 @Override public boolean deleteSurroundingText(int before, int after) {
-                    for (int i = 0; i < before; i++) {
-                        sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
-                        sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL));
-                    }
+                    for (int i = 0; i < before; i++) backspace();
                     return true;
+                }
+
+                /** Turn the composing text into {@code text}: Backspace the part that differs, type the rest. */
+                private void replaceComposing(CharSequence text) {
+                    String now = text != null ? text.toString() : "";
+                    int common = 0;
+                    while (common < now.length() && common < composing.length()
+                            && now.charAt(common) == composing.charAt(common)) common++;
+                    for (int i = composing.length(); i > common; i--) backspace();
+                    composing.setLength(common);
+                    for (int i = common; i < now.length(); i++) {
+                        char c = now.charAt(i);
+                        KeyEvent[] events = KEY_MAP.getEvents(new char[]{ c });
+                        if (events != null) for (KeyEvent e : events) sendKeyEvent(e);
+                        composing.append(c);
+                    }
+                }
+
+                private void backspace() {
+                    sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
+                    sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL));
                 }
             };
         }
+
+        private static final android.view.KeyCharacterMap KEY_MAP =
+                android.view.KeyCharacterMap.load(android.view.KeyCharacterMap.VIRTUAL_KEYBOARD);
     }
 }

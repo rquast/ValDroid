@@ -92,6 +92,7 @@ namespace ValDroid
             NoCinematics.Tick();
             Diagnostics.Tick();
             UiClickDiag.Tick();
+            MemoryLog.Tick();
         }
     }
 }
