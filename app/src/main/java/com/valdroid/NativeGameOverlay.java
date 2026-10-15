@@ -154,7 +154,6 @@ public class NativeGameOverlay extends FrameLayout
             stopHud();
             stopDeviceWatch();
             ui.removeCallbacks(mouseLockTick);
-            if (hasPointerCapture()) releasePointerCapture();
             if (gamepad != null) gamepad.stop();   // releases whatever the controller held
             controls.resetAll();   // nothing stays held while the game is in the background
         }
@@ -298,7 +297,11 @@ public class NativeGameOverlay extends FrameLayout
     // buttons are the game's left, right and middle buttons, its wheel the wheel. Left to the player, a
     // press arrived as a bare touch and became a left click wherever it was, so the right button never
     // reached the game (an Infinix player could not eat, 2026-10-14). While the game holds the mouse
-    // (mouse look) it is captured, as on the box64 engine, and its relative motion turns the camera.
+    // (mouse look) the pointer is captured and its relative motion turns the camera. The capture itself
+    // is the Unity player's: it requests and releases it as the game locks and frees its cursor
+    // (Cursor.lockState). The overlay only takes the captured motion: an earlier poll of its own released
+    // the player's capture whenever its idea of "a mouse is connected" differed, and the free pointer
+    // ran to the screen edge mid-game and brought up Android's bars (the same Infinix player, 2026-10-15).
     private static boolean isMouse(android.view.MotionEvent e) {
         return (e.getSource() & android.view.InputDevice.SOURCE_MOUSE) == android.view.InputDevice.SOURCE_MOUSE
                 || e.getToolType(0) == android.view.MotionEvent.TOOL_TYPE_MOUSE;
@@ -311,13 +314,21 @@ public class NativeGameOverlay extends FrameLayout
     }
 
     private int mouseButtonsDown;   // MotionEvent.BUTTON_* reported pressed
+    private float hoverX = -1, hoverY = -1;   // the free pointer's last position
 
     private boolean mouseMotion(android.view.MotionEvent e) {
         switch (e.getActionMasked()) {
             case android.view.MotionEvent.ACTION_HOVER_ENTER:
-            case android.view.MotionEvent.ACTION_HOVER_MOVE:
-                controls.moveCursorTo(e.getX(), e.getY());
+            case android.view.MotionEvent.ACTION_HOVER_MOVE: {
+                float x = e.getX(), y = e.getY();
+                // The game holds the mouse but the pointer is not captured (yet): turn the camera by the
+                // pointer's own motion, so mouse look never goes dead.
+                if (InputSink.isMouseLocked() && !hasPointerCapture() && hoverX >= 0) controls.moveCursorBy(x - hoverX, y - hoverY);
+                else controls.moveCursorTo(x, y);
+                hoverX = x;
+                hoverY = y;
                 return true;
+            }
             case android.view.MotionEvent.ACTION_SCROLL: {
                 float v = e.getAxisValue(android.view.MotionEvent.AXIS_VSCROLL);
                 controls.moveCursorTo(e.getX(), e.getY());
@@ -385,26 +396,45 @@ public class NativeGameOverlay extends FrameLayout
         return true;
     }
 
-    // As GameActivity's mouseLockTick: polled, because the lock is the game's (the bridge reports it).
+    // Polled, because the lock is the game's (the bridge reports it): the overlay's cursor hides while
+    // the game holds the mouse. Each change of the lock, of the mice Android reports or of the capture
+    // goes to the log, one line, to follow a lost capture from a report.
+    private String lastMouseState;
+
     private final Runnable mouseLockTick = new Runnable() {
         @Override public void run() {
             boolean locked = InputSink.isMouseLocked();
-            boolean mouse = hasPhysicalMouse();
+            String mice = physicalMice();
             controls.setMouseLocked(locked);
-            controls.setPhysicalMouse(mouse);
-            boolean want = locked && mouse;
-            if (want && !hasPointerCapture()) requestPointerCapture();
-            else if (!want && hasPointerCapture()) releasePointerCapture();
+            controls.setPhysicalMouse(!mice.isEmpty());
+            logMouseState(locked, mice);
             ui.postDelayed(this, 150);
         }
     };
 
-    private static boolean hasPhysicalMouse() {
+    @Override public void onPointerCaptureChange(boolean hasCapture) {
+        super.onPointerCaptureChange(hasCapture);
+        logMouseState(InputSink.isMouseLocked(), physicalMice());
+    }
+
+    private void logMouseState(boolean locked, String mice) {
+        String state = "game lock " + (locked ? "on" : "off") + ", pointer capture " + (hasPointerCapture() ? "on" : "off")
+                + ", mice: " + (mice.isEmpty() ? "none" : mice);
+        if (state.equals(lastMouseState)) return;
+        lastMouseState = state;
+        android.util.Log.i("ValDroid/Mouse", state);
+    }
+
+    /** The physical mice Android reports, by name; empty when none. */
+    private static String physicalMice() {
+        StringBuilder sb = new StringBuilder();
         for (int id : android.view.InputDevice.getDeviceIds()) {
             android.view.InputDevice d = android.view.InputDevice.getDevice(id);
-            if (d != null && !d.isVirtual() && d.supportsSource(android.view.InputDevice.SOURCE_MOUSE)) return true;
+            if (d == null || d.isVirtual() || !d.supportsSource(android.view.InputDevice.SOURCE_MOUSE)) continue;
+            if (sb.length() > 0) sb.append("; ");
+            sb.append(d.getName());
         }
-        return false;
+        return sb.toString();
     }
 
     @Override protected void onDetachedFromWindow() {
