@@ -1,0 +1,17 @@
+name: Networking host checks
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'app/src/main/cpp/steam_*'
+      - 'tools/steam-stub-arm64/**'
+      - '.github/workflows/networking-host-tests.yml'
+permissions:
+  contents: read
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generator parity, exports, boundary and certificate encoding tests
+        run: python3 tools/steam-stub-arm64/run_host_tests.py

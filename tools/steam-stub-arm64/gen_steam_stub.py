@@ -5,7 +5,7 @@ Valheim quits unless SteamAPI_Init() succeeds and Steamworks.NET's CSteamAPICont
 pipe, a user and non-NULL interface pointers. Under emulated Mono the Goldberg emulator provides that;
 under native ARM64 Mono the game's P/Invokes land in an ARM64 library next to the runtime instead, and
 this stub plays Steam in offline single-player mode: every call "works", every query answers a fixed,
-plausible value, everything else returns zero.
+plausible value. Networking explicitly reports unavailable; other unimplemented calls return zero.
 
 Input: steamworks_net_imports.tsv (one row per DllImport of Valheim's Steamworks.NET, with the ABI of
 its return value). Every entry point gets a typed export so float and struct returns use the right
@@ -45,7 +45,6 @@ OVERRIDES = {
     "SteamAPI_ISteamUtils_GetAppID": APP_ID,
     "SteamAPI_ISteamUtils_GetIPCountry": "(uint64_t)(uintptr_t)vd_country",
     "SteamAPI_ISteamUserStats_RequestCurrentStats": "1",
-    "SteamAPI_ISteamNetworkingSockets_InitAuthentication": "100",   # k_ESteamNetworkingAvailability_Current
     # Valheim picks its Steam Deck platform config (lighter defaults, controller UI) from this, not
     # from the SteamDeck environment variable. On by default; SteamDeck=0 in the environment turns it off.
     "SteamAPI_ISteamUtils_IsSteamRunningOnSteamDeck": "vd_steam_deck()",
@@ -54,6 +53,14 @@ OVERRIDES = {
     # character-creation "Done" button does nothing. Cloud stays disabled, so saves still go local.
     "SteamAPI_ISteamRemoteStorage_BeginFileWriteBatch": "1",
     "SteamAPI_ISteamRemoteStorage_EndFileWriteBatch": "1",
+}
+
+# Typed offline networking exports need output parameters, not generic zero-return stubs.
+NETWORK_EXPORTS = {
+    "SteamAPI_ISteamNetworkingSockets_InitAuthentication",
+    "SteamAPI_ISteamNetworkingSockets_GetAuthenticationStatus",
+    "SteamAPI_ISteamNetworkingUtils_GetRelayNetworkStatus",
+    "SteamAPI_ISteamNetworkingSockets_SendMessageToConnection",
 }
 
 # every ISteamClient_GetISteamXxx accessor returns the dummy interface
@@ -87,6 +94,8 @@ def main():
         "",
         "#define VD_EXPORT __attribute__((visibility(\"default\")))",
         "",
+        '#include "steam_networking_offline.h"',
+        "",
         "/* Steam Deck mode unless the launcher environment says SteamDeck=0. */",
         "static uint64_t vd_steam_deck(void)",
         "{",
@@ -106,8 +115,14 @@ def main():
         lines.append(f"typedef {decl} vd_{tag};")
     lines.append("")
 
+    missing = NETWORK_EXPORTS - {name for name, _, _ in rows}
+    if missing:
+        sys.exit(f"missing offline networking entry points: {sorted(missing)}")
+
     unused = set(OVERRIDES)
     for name, managed, abi in rows:
+        if name in NETWORK_EXPORTS:
+            continue
         value = OVERRIDES.get(name)
         if value is None and name.startswith(INTERFACE_PREFIX):
             value = "(uint64_t)(uintptr_t)vd_interface"
@@ -133,3 +148,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
