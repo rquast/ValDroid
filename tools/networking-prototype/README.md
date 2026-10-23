@@ -13,8 +13,9 @@ third-party wrapper, proprietary SDK/game binary or Valve source copy is bundled
 
 To compile into a caller, compile `gns_transport.cpp` and `gns_native.cpp` with
 C++17, add the pinned GNS `include/` directory, and link the caller against its
-reviewed GNS build and that build's dependencies. This prototype does not install
-or run GNS's build scripts. A real link and Android ARM64 build remain required.
+reviewed GNS build and that build's dependencies. The opt-in CMake target and
+GitHub Actions workflow now build the pinned official library. Linked test results
+must be checked in the workflow; an Android ARM64 build remains separate.
 
 Host compile/control-flow checks with a previously obtained header checkout:
 
@@ -89,7 +90,62 @@ socket and proves neither Steam authentication nor transport interoperability.
 The native backend has not been linked to a real GNS library or exercised on a
 device/server. Tests do not establish APK ABI compatibility or multiplayer.
 
+## Approved linked-library CI experiment
+
+`CMakeLists.txt` now supplies a separately runnable real-library test. It refuses
+any GNS checkout revision other than the pinned commit above, builds the shared
+library with ICE/WebRTC/examples/upstream tests/tools disabled, and links both
+adapter translation units into `valdroid_gns_smoke`.
+
+On Ubuntu with the approved official dependencies (`cmake`, `ninja-build`,
+`libssl-dev`, `libprotobuf-dev`, `protobuf-compiler`) already installed:
+
+```sh
+cmake -S tools/networking-prototype -B build/gns-prototype -G Ninja \
+  -DGNS_SOURCE_DIR="$(pwd)/_deps/GameNetworkingSockets" \
+  -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/gns-prototype --parallel 2
+ctest --test-dir build/gns-prototype --output-on-failure
+```
+
+The caller/CI owns checkout and dependency installation. This CMake project
+does not fetch dependencies or change certificate roots/authentication settings.
+
+`real_gns_local_smoke` is designed to test real initialization/getters,
+ephemeral unsigned certificate-request generation without writing/logging keys,
+guarded rejection with no server identity/session, and two-way message delivery,
+release and cleanup through GNS's **in-process** socket-pair API. The socket pair
+uses internal buffers (`bUseNetworkLoopback=false`), bypasses the network, and is
+deliberately separate from the authenticated adapter. It is not authenticated
+UDP, does not prove cert issuance/verification, and does not contact Steam or a
+Valheim server. The library retains its ephemeral private key only until shutdown.
+
+At authoring time, this new smoke executable passes syntax checking but its
+actual link/runtime result is pending CI. Report that result separately rather
+than inferring success from the source or recording-fake tests.
+
 Primary contracts:
 
 - [ISteamNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets/blob/d534c19aa760df3fb75fd20db13ba1932b8a5463/include/steam/isteamnetworkingsockets.h)
 - [Configuration, identity, state and message ownership types](https://github.com/ValveSoftware/GameNetworkingSockets/blob/d534c19aa760df3fb75fd20db13ba1932b8a5463/include/steam/steamnetworkingtypes.h)
+
+## Approved linked-library CI experiment
+
+The `Pinned GNS prototype checks` workflow checks out the exact official commit,
+installs standard Ubuntu OpenSSL/protobuf/CMake/Ninja packages, compiles the real
+shared library and adapter, then runs CTest. No Steam credentials are supplied.
+
+```sh
+cmake -S tools/networking-prototype -B build/networking-prototype -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug -DGNS_SOURCE_DIR=/path/to/pinned/GameNetworkingSockets
+cmake --build build/networking-prototype --parallel 2
+ctest --test-dir build/networking-prototype --output-on-failure
+```
+
+`real_gns_local_smoke` checks initialization, anonymous authentication status,
+in-memory ephemeral public certificate request generation, guarded rejection
+without a session, and real in-process socket-pair message send/receive/release.
+SocketPair(false) uses internal buffers, not UDP, and is intentionally separate
+from authenticated Transport. No network authentication setting is relaxed.
+This test cannot prove Steam login, certificate trust, authenticated UDP, Android
+or a Valheim server join. Do not equate a green linked test with multiplayer.
