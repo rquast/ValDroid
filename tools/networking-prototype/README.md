@@ -136,9 +136,12 @@ Primary contracts:
 ## Controlled UDP fixture (runtime pending)
 
 `real_gns_udp_loopback_fixture` adds a credential-free, bounded host test. It
-asserts local rejection of strict listener/client creation (the pinned OSS build
-cannot create the strict listener without its certificate-authority capability).
-That is **not a remote authentication-rejection handshake**.
+asserts local rejection of strict listener creation and immediate or asynchronous
+client failure without any Connected state. A returned connection handle alone
+is not success: the pinned GNS client initializes identity before applying the
+passed options. The fixture shortens the initial connection timeout only; all
+production authentication settings remain strict. Negative outcomes are **not
+proof of a cryptographic or remote authentication-rejection handshake**.
 
 Separately, official `CreateSocketPair(..., true)` creates actual localhost UDP
 endpoints. The fixture checks two-way request/response through `NativeSockets`,

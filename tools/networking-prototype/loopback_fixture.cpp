@@ -91,9 +91,58 @@ int main() {
         require(listener == k_HSteamListenSocket_Invalid,
                 "Strict listener unexpectedly available without cert authority");
         const auto strict_client = native.connect_authenticated(endpoint);
-        if (strict_client != k_HSteamNetConnection_Invalid) native.close(strict_client);
-        require(strict_client == k_HSteamNetConnection_Invalid,
-                "Strict client unexpectedly accepted missing local identity");
+        if (strict_client != k_HSteamNetConnection_Invalid) {
+            // A handle means initialization, not successful authentication.
+            // The pinned UDP identity helper runs before passed-in config is
+            // applied, and can select an anonymous identity before auth fails.
+            // Only shorten the test timeout; never relax trust/auth/encryption.
+            struct CloseClient {
+                NativeSockets& native;
+                HSteamNetConnection handle;
+                ~CloseClient() { native.close(handle); }
+            } cleanup{native, strict_client};
+            require(SteamNetworkingUtils()->SetConnectionConfigValueInt32(
+                        strict_client, k_ESteamNetworkingConfig_TimeoutInitial, 1000),
+                    "Could not bound strict-client connection timeout");
+            bool terminal = false;
+            bool terminal_callback = false;
+            int failure_reason = 0;
+            const auto deadline = Clock::now() + std::chrono::seconds(5);
+            while (Clock::now() < deadline && !(terminal && terminal_callback)) {
+                native.callbacks();
+                for (const auto& event : events) {
+                    if (event.handle != strict_client) continue;
+                    require(event.state != k_ESteamNetworkingConnectionState_Connected,
+                            "Strict credential-free path emitted Connected callback");
+                    if (event.state == k_ESteamNetworkingConnectionState_ProblemDetectedLocally ||
+                        event.state == k_ESteamNetworkingConnectionState_ClosedByPeer)
+                        terminal_callback = true;
+                }
+                SteamNetConnectionInfo_t info{};
+                require(native.info(strict_client, info), "Strict-client info unavailable");
+                require(info.m_eState != k_ESteamNetworkingConnectionState_Connected,
+                        "Strict credential-free path reached Connected");
+                terminal = info.m_eState == k_ESteamNetworkingConnectionState_ProblemDetectedLocally ||
+                           info.m_eState == k_ESteamNetworkingConnectionState_ClosedByPeer;
+                failure_reason = info.m_eEndReason;
+                SteamNetworkingMessage_t* raw = nullptr;
+                const int count = native.receive(strict_client, &raw, 1);
+                Message unexpected(raw); // Release even if assertion fails.
+                require(count <= 0 && !unexpected, "Strict client delivered application data");
+                if (!(terminal && terminal_callback))
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            require(terminal && terminal_callback && failure_reason != 0,
+                    "Strict client did not report terminal failure within deadline");
+            require(native.authentication() != k_ESteamNetworkingAvailability_Current,
+                    "Strict client unexpectedly established authentication");
+            // Report actual reason; an unreachable-endpoint timeout is NOT
+            // evidence that a remote server rejected an authentication ticket.
+            std::cout << "Strict client terminal failure reason=" << failure_reason
+                      << " (no listening server; not remote auth rejection).\n";
+        } else {
+            std::cout << "Strict client rejected immediately before connection.\n";
+        }
         native.callbacks();
         for (const auto& event : events)
             require(event.state != k_ESteamNetworkingConnectionState_Connected,
@@ -138,7 +187,7 @@ int main() {
         SteamNetworkingMessage_t* raw = nullptr;
         require(native.receive(closed_handle, &raw, 1) < 0 && raw == nullptr,
                 "Closed handle receive did not fail cleanly");
-        std::cout << "PASS: strict listener/client rejected locally without credentials; "
+        std::cout << "PASS: strict listener unavailable and strict client failed without credentials; "
                      "real UDP loopback pair request/response via NativeSockets, message release, "
                      "peer-close callback and closed-handle errors.\n"
                      "NOT TESTED: successful listener handshake, authenticated UDP, Steam login, "
