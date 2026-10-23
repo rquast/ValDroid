@@ -42,3 +42,11 @@ enable_testing()
 add_test(NAME recording_fake_control_flow COMMAND valdroid_gns_recording_tests)
 add_test(NAME real_gns_local_smoke COMMAND valdroid_gns_smoke)
 set_tests_properties(real_gns_local_smoke PROPERTIES TIMEOUT 20)
+
+# Real UDP loopback only, plus fail-closed credential-free listener/client checks.
+# This is not a successful authenticated listener or a Valheim server fixture.
+add_executable(valdroid_gns_loopback_fixture loopback_fixture.cpp)
+target_link_libraries(valdroid_gns_loopback_fixture PRIVATE valdroid_gns_adapter)
+target_compile_options(valdroid_gns_loopback_fixture PRIVATE -Wall -Wextra -Werror)
+add_test(NAME real_gns_udp_loopback_fixture COMMAND valdroid_gns_loopback_fixture)
+set_tests_properties(real_gns_udp_loopback_fixture PROPERTIES TIMEOUT 25)

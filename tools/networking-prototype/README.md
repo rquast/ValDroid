@@ -87,8 +87,9 @@ Passed locally:
 
 The fake deliberately uses synthetic identities only inside tests. It opens no
 socket and proves neither Steam authentication nor transport interoperability.
-The native backend has not been linked to a real GNS library or exercised on a
-device/server. Tests do not establish APK ABI compatibility or multiplayer.
+The native backend was compiled and linked against real GNS in the CI run below.
+It has not been exercised on an Android device or Valheim server. Tests do not
+establish APK ABI compatibility or multiplayer.
 
 ## Approved linked-library CI experiment
 
@@ -120,32 +121,33 @@ deliberately separate from the authenticated adapter. It is not authenticated
 UDP, does not prove cert issuance/verification, and does not contact Steam or a
 Valheim server. The library retains its ephemeral private key only until shutdown.
 
-At authoring time, this new smoke executable passes syntax checking but its
-actual link/runtime result is pending CI. Report that result separately rather
-than inferring success from the source or recording-fake tests.
+Verified on commit `54f4c5f6955b4117d83f8ea9f89c3de764daf530`: [CI run
+39938822101](https://github.com/rquast/ValDroid/actions/runs/39938822101) compiled
+and linked the pinned shared library and adapter; both CTest tests passed
+(`recording_fake_control_flow`, `real_gns_local_smoke`). This is host evidence,
+not Android transport or a Valheim login.
 
 Primary contracts:
 
 - [ISteamNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets/blob/d534c19aa760df3fb75fd20db13ba1932b8a5463/include/steam/isteamnetworkingsockets.h)
 - [Configuration, identity, state and message ownership types](https://github.com/ValveSoftware/GameNetworkingSockets/blob/d534c19aa760df3fb75fd20db13ba1932b8a5463/include/steam/steamnetworkingtypes.h)
 
-## Approved linked-library CI experiment
 
-The `Pinned GNS prototype checks` workflow checks out the exact official commit,
-installs standard Ubuntu OpenSSL/protobuf/CMake/Ninja packages, compiles the real
-shared library and adapter, then runs CTest. No Steam credentials are supplied.
+## Controlled UDP fixture (runtime pending)
 
-```sh
-cmake -S tools/networking-prototype -B build/networking-prototype -G Ninja \
-  -DCMAKE_BUILD_TYPE=Debug -DGNS_SOURCE_DIR=/path/to/pinned/GameNetworkingSockets
-cmake --build build/networking-prototype --parallel 2
-ctest --test-dir build/networking-prototype --output-on-failure
-```
+`real_gns_udp_loopback_fixture` adds a credential-free, bounded host test. It
+asserts local rejection of strict listener/client creation (the pinned OSS build
+cannot create the strict listener without its certificate-authority capability).
+That is **not a remote authentication-rejection handshake**.
 
-`real_gns_local_smoke` checks initialization, anonymous authentication status,
-in-memory ephemeral public certificate request generation, guarded rejection
-without a session, and real in-process socket-pair message send/receive/release.
-SocketPair(false) uses internal buffers, not UDP, and is intentionally separate
-from authenticated Transport. No network authentication setting is relaxed.
-This test cannot prove Steam login, certificate trust, authenticated UDP, Android
-or a Valheim server join. Do not equate a green linked test with multiplayer.
+Separately, official `CreateSocketPair(..., true)` creates actual localhost UDP
+endpoints. The fixture checks two-way request/response through `NativeSockets`,
+message release, peer-close callback/reason, and closed-handle errors. It does not
+relax any authentication setting, and does not route the socket pair through the
+higher-level `Transport` session gate. Each asynchronous wait is capped at five
+seconds; CTest caps the executable at 25 seconds.
+
+This proves neither a successful listener handshake nor authenticated UDP, Steam
+login, packet-loss behavior, Android integration or Valheim protocol. No external
+server or credentials are used. Runtime results must be reported from CI, not
+inferred from its passing syntax check.
