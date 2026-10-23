@@ -103,7 +103,8 @@ services. Obtain any SDK lawfully; do not commit proprietary SDK/game binaries.
   and generated-file parity passed. The full generated host shared library compiled
   with warnings-as-errors and loaded successfully; startup/offline/status checks
   passed and all 168 inventoried networking/authentication exports were present.
-- No full Gradle/NDK build, APK packaging, device test, Steam login, GNS peer test
+- Subsequent GitHub CI completed a full fallback-engine Gradle/NDK build and APK
+  packaging. No native Unity build, device test, Steam login, GNS peer test
   or live Valheim connection was performed. No authentication credentials acquired.
 
 Local isolated tests:
@@ -155,8 +156,10 @@ is the encoder contract, not a replacement for authentication validation.
 
 `ASAN_OPTIONS=detect_leaks=0 python3 tools/steam-stub-arm64/run_host_tests.py`
 passed locally. Omit the sanitizer override on a normal machine to retain leak
-checking. A proposed GitHub Actions workflow runs the same host suite on pull
-requests; it has not been published or run on GitHub.
+checking. The GitHub Actions host suite passed on commit `06b67c7b8cb64029b57dd038b03326904b8d10d3`.
+The existing Android workflow also built and uploaded both Debug and Release APKs.
+Its native Unity module preparation was skipped, so this validates fallback-engine
+packaging, not the native Unity engine or multiplayer. [Build run](https://github.com/rquast/ValDroid/actions/runs/39937003546).
 
 The current workspace lacks SDK/NDK, Gradle and CMake. Project requirements are
 Android SDK 35, NDK 27.0.12077973 and CMake 3.22.1. Official Android command-line
@@ -168,3 +171,17 @@ build environment or authorized GitHub CI is needed for a full Android build.
 Public GNS currently declares `SteamNetworkingSockets012` and
 `SteamNetworkingUtils004`; the ValDroid TSV does not establish which interface
 version Valheim 1.0.20 actually requests. Do not assume those versions match.
+
+## Optional real transport adapter
+
+`tools/networking-prototype/` now contains a typed C++ adapter invoking real GNS
+connect/send/receive/callback/close APIs. It is standalone and not enabled in the
+APK. It requires authenticated encrypted connections, expected-peer identity
+pinning, and a separately implemented session-authorization verifier. Both normal
+IP and localhost unauthenticated allowances are explicitly disabled. Messages
+have RAII ownership and revocation closes the connection.
+
+Production sources pass syntax checks against pinned official GNS headers at
+`d534c19aa760df3fb75fd20db13ba1932b8a5463`; recording-fake lifecycle tests pass
+ASan/UBSan. This is not a real GNS link or network test. See the prototype README
+for integration prerequisites, dependency provenance and exact limits.
