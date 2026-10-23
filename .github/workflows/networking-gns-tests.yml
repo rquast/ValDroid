@@ -1,0 +1,39 @@
+name: Pinned GNS prototype checks
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/networking-prototype/**'
+      - '.github/workflows/networking-gns-tests.yml'
+permissions:
+  contents: read
+jobs:
+  linked-gns-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout ValDroid
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout pinned official Valve GNS
+        uses: actions/checkout@v4
+        with:
+          repository: ValveSoftware/GameNetworkingSockets
+          ref: d534c19aa760df3fb75fd20db13ba1932b8a5463
+          path: _deps/GameNetworkingSockets
+          persist-credentials: false
+      - name: Verify dependency revision
+        run: test "$(git -C _deps/GameNetworkingSockets rev-parse HEAD)" = d534c19aa760df3fb75fd20db13ba1932b8a5463
+      - name: Install standard build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y cmake ninja-build libssl-dev libprotobuf-dev protobuf-compiler
+      - name: Compile and run recording-fake lifecycle tests
+        run: python3 tools/networking-prototype/run_tests.py --gns-include _deps/GameNetworkingSockets/include
+      - name: Configure real GNS and prototype
+        run: cmake -S tools/networking-prototype -B build/networking-prototype -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGNS_SOURCE_DIR="$GITHUB_WORKSPACE/_deps/GameNetworkingSockets"
+      - name: Build and link real GNS
+        run: cmake --build build/networking-prototype --parallel 2
+      - name: Run local linked-library checks (no credentials)
+        run: ctest --test-dir build/networking-prototype --output-on-failure

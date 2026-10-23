@@ -5,6 +5,8 @@
 
 #define VD_EXPORT __attribute__((visibility("default")))
 
+#include "steam_networking_offline.h"
+
 /* Steam Deck mode unless the launcher environment says SteamDeck=0. */
 static uint64_t vd_steam_deck(void)
 {
@@ -516,7 +518,6 @@ VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_CreateSocketPair(void) { ret
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_DestroyPollGroup(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_FindRelayAuthTicketForServer(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_FlushMessagesOnConnection(void) { return 0; }
-VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_GetAuthenticationStatus(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_GetCertificateRequest(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_GetConnectionInfo(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_GetConnectionName(void) { return 0; }
@@ -531,14 +532,12 @@ VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_GetHostedDedicatedServerPort
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_GetIdentity(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_GetListenSocketAddress(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_GetRemoteFakeIPForConnection(void) { return 0; }
-VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_InitAuthentication(void) { return 100; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_ReceiveMessagesOnConnection(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_ReceiveMessagesOnPollGroup(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_ReceivedP2PCustomSignal(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_ReceivedRelayAuthTicket(void) { return 0; }
 VD_EXPORT void SteamAPI_ISteamNetworkingSockets_ResetIdentity(void) {}
 VD_EXPORT void SteamAPI_ISteamNetworkingSockets_RunCallbacks(void) {}
-VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_SendMessageToConnection(void) { return 0; }
 VD_EXPORT void SteamAPI_ISteamNetworkingSockets_SendMessages(void) {}
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingSockets_SetCertificate(void) { return 0; }
 VD_EXPORT void SteamAPI_ISteamNetworkingSockets_SetConnectionName(void) {}
@@ -559,7 +558,6 @@ VD_EXPORT uint64_t SteamAPI_ISteamNetworkingUtils_GetPOPCount(void) { return 0; 
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingUtils_GetPOPList(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingUtils_GetPingToDataCenter(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingUtils_GetRealIdentityForFakeIP(void) { return 0; }
-VD_EXPORT uint64_t SteamAPI_ISteamNetworkingUtils_GetRelayNetworkStatus(void) { return 0; }
 VD_EXPORT void SteamAPI_ISteamNetworkingUtils_InitRelayNetworkAccess(void) {}
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingUtils_IsFakeIPv4(void) { return 0; }
 VD_EXPORT uint64_t SteamAPI_ISteamNetworkingUtils_IterateGenericEditableConfigValues(void) { return 0; }
